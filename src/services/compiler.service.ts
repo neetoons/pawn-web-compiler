@@ -21,13 +21,10 @@ export class CompilerService {
 
     async unzipGamemode(zipPath: string, outputDir: string): Promise<void> {
         try {
-            // Asegurarse de que el directorio de salida exista
+            // Asegúrate de que el directorio de salida existe
             await fs.ensureDir(outputDir);
-
-            // Usamos unzipper para extraer el archivo .zip
             const zipStream = fs.createReadStream(zipPath);
 
-            // Extraemos el archivo .zip
             await new Promise<void>((resolve, reject) => {
                 zipStream
                     .pipe(unzipper.Extract({ path: outputDir }))
@@ -37,64 +34,97 @@ export class CompilerService {
 
             logger.info(`Unzipped gamemode to ${outputDir}`);
         } catch (error) {
-            // Loguear el error y lanzar una excepción personalizada
             logger.error('Failed to unzip gamemode', { error });
             throw new Error('Failed to unzip gamemode');
         }
     }
 
-    async compile(inputDir: string, outputFile: string): Promise<any> {
+    async compile(inputDir: string, outputDir: string): Promise<void> {
         try {
-            // Buscar el archivo .pwn
-            const files = await fs.readdir(inputDir);
-            const pwnFile = files.find(file => file.endsWith('.pwn'));
-
-            if (!pwnFile) {
-                throw this.createError('No .pwn file found', 400);
+            const gamemodesDir = path.join(inputDir, 'gamemodes');
+            if (!(await fs.pathExists(gamemodesDir))) {
+                throw this.createError(`'gamemodes' directory not found in ${inputDir}`, 400);
             }
-
-            const pwnPath = path.join(inputDir, pwnFile);
-            const compilerPath = path.join(CONFIG.PATHS.COMPILER, 'pawno', 'pawncc');
-
-            // En Windows no necesitamos ./
-            const pawnccCommand = process.platform === 'win32' ?
-                compilerPath :
-                `./${path.relative(inputDir, compilerPath)}`;
-
-            await fs.ensureDir(path.dirname(outputFile));
-
-            // Dar permisos al compilador en Unix
+    
+            // Verifica que haya al menos un archivo .pwn
+            const files = await fs.readdir(gamemodesDir);
+            const pwnFile = files.find(file => file.endsWith('.pwn'));
+            if (!pwnFile) {
+                throw this.createError('No .pwn file found in the gamemodes directory', 400);
+            }
+    
+            const pwnPath = path.join(gamemodesDir, pwnFile); // Ruta correcta para el archivo .pwn
+            const compilerPath = path.join(CONFIG.PATHS.COMPILER, 'pawncc'); // Ruta al compilador
+    
+            // Corrige la ruta de salida para que solo sea el directorio y el nombre del archivo .amx
+            const outputFilePath = path.join(outputDir, `${pwnFile.replace('.pwn', '.amx')}`);
+    
+            logger.info('Paths being used:', { compilerPath, pwnPath, outputFilePath });
+    
+            // Asegúrate de que el directorio de salida exista antes de continuar
+            await fs.ensureDir(path.dirname(outputFilePath));
+    
+            // Verifica si el compilador tiene permisos de ejecución
             if (process.platform !== 'win32') {
                 await fs.chmod(compilerPath, '755');
             }
-
-            return new Promise((resolve, reject) => {
-                // Cambiar al directorio de la gamemode
-                process.chdir(inputDir);
-
-                const command = `"${pawnccCommand}" "${pwnPath}" -o"${outputFile}"`;
-
-                logger.info('Executing compiler', { command });
-
-                exec(command, {
-                    cwd: inputDir,
-                    env: {
-                        ...process.env,
-                        PATH: `${process.env.PATH}:${path.join(CONFIG.PATHS.COMPILER, 'pawno')}`
-                    }
-                }, (error, stdout, stderr) => {
-                    if (error || stderr) {
-                        logger.error('Compilation failed', { stdout, stderr });
-                        reject(new Error(stderr || stdout));
-                        return;
-                    }
-                    logger.success('Compilation successful');
-                    resolve();
-                });
-            });
+    
+            // Ejecuta el comando de compilación
+            const compileResult = await this.executeCompilerCommand(compilerPath, pwnPath, outputFilePath);
+            if (compileResult.success) {
+                logger.success('Compilation successful');
+            } else {
+                throw this.createError(`Compilation failed: ${compileResult.stderr || compileResult.stdout}`, 500);
+            }
         } catch (error) {
             logger.error('Compilation error', { error });
-            throw error;
+            throw error; // Propaga el error para manejo adicional
+        }
+    }
+    
+
+    private async executeCompilerCommand(compilerPath: string, pwnPath: string, outputFilePath: string): Promise<{ success: boolean, stdout: string, stderr: string }> {
+        try {
+            const includePath = path.join(__dirname, 'pawno', 'includes'); // Asegúrate de que `__dirname` sea el directorio correcto
+            const command = `"${compilerPath}" -I"${includePath}" "${pwnPath}" -o"${outputFilePath}"`;
+            logger.info('Executing compiler', { command });
+    
+            const { stdout, stderr } = await exec(command, { cwd: path.dirname(pwnPath) });
+    
+            if (stderr) {
+                logger.error('Compilation failed', { stdout, stderr });
+                return { success: false, stdout, stderr };
+            }
+    
+            return { success: true, stdout, stderr };
+        } catch (error) {
+            logger.error('Compilation error', { error: error.message });
+            return { success: false, stdout: '', stderr: error.message };
+        }
+    }
+    
+
+    private async resolveIncludes(pwnPath: string, includeDir: string): Promise<void> {
+        try {
+            const fileContent = await fs.readFile(pwnPath, 'utf8');
+            const includeRegex = /#include\s+["<](.+?)[">]/g;
+            const matches = [...fileContent.matchAll(includeRegex)];
+
+            for (const match of matches) {
+                const includePath = match[1];
+                const resolvedPath = path.resolve(path.dirname(pwnPath), includePath);
+
+                if (await fs.pathExists(resolvedPath)) {
+                    const destPath = path.join(includeDir, path.basename(includePath));
+                    await fs.copy(resolvedPath, destPath);
+                    logger.info(`Copied include file: ${resolvedPath} to ${destPath}`);
+                } else {
+                    logger.warn(`Include file not found: ${includePath}`);
+                }
+            }
+        } catch (error) {
+            logger.error('Failed to resolve includes', { error });
+            throw new Error('Failed to resolve includes');
         }
     }
 
