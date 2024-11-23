@@ -84,25 +84,20 @@ export class CompilerService {
     
 
     private async executeCompilerCommand(compilerPath: string, pwnPath: string, outputFilePath: string): Promise<{ success: boolean, stdout: string, stderr: string }> {
-        try {
-            const includePath = path.join(__dirname, 'pawno', 'includes'); // Asegúrate de que `__dirname` sea el directorio correcto
-            const command = `"${compilerPath}" -I"${includePath}" "${pwnPath}" -o"${outputFilePath}"`;
+        return new Promise((resolve, reject) => {
+            const command = `"${compilerPath}" "${pwnPath}" -o"${outputFilePath}"`;
             logger.info('Executing compiler', { command });
-    
-            const { stdout, stderr } = await exec(command, { cwd: path.dirname(pwnPath) });
-    
-            if (stderr) {
-                logger.error('Compilation failed', { stdout, stderr });
-                return { success: false, stdout, stderr };
-            }
-    
-            return { success: true, stdout, stderr };
-        } catch (error) {
-            logger.error('Compilation error', { error: error.message });
-            return { success: false, stdout: '', stderr: error.message };
-        }
+
+            exec(command, { cwd: path.dirname(pwnPath) }, (error, stdout, stderr) => {
+                if (error || stderr) {
+                    logger.error('Compilation failed', { stdout, stderr, error: error.message });
+                    resolve({ success: false, stdout, stderr });
+                } else {
+                    resolve({ success: true, stdout, stderr });
+                }
+            });
+        });
     }
-    
 
     private async resolveIncludes(pwnPath: string, includeDir: string): Promise<void> {
         try {
