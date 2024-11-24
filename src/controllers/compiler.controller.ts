@@ -6,7 +6,11 @@ import { CONFIG } from '../config/index';
 import { logger } from '../utils/logger';
 import { CompileError } from '../types';
 
-export async function compileHandler(req: Request, res: Response): Promise<any> {
+interface CustomRequest extends Omit<Request, 'file'> {
+  file?: Express.Multer.File;
+}
+
+export async function compileHandler(req: CustomRequest, res: Response): Promise<any> {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
@@ -20,9 +24,6 @@ export async function compileHandler(req: Request, res: Response): Promise<any> 
   try {
     // Descomprimir
     await service.unzipGamemode(zipPath, outputDir);
-
-    // Compilar
-    await service.compile(outputDir, outputFile);
 
     res.json({
       message: 'Compilation successful',
@@ -49,13 +50,13 @@ export async function compileHandler(req: Request, res: Response): Promise<any> 
   }
 }
 
-export async function downloadHandler(req: Request, res: Response): Promise<any> {
+export async function downloadHandler(req: Request, res: Response): Promise<void> {
   const filename = req.params.filename;
   const filePath = path.join(CONFIG.PATHS.OUTPUT, filename);
 
   try {
     if (!await fs.pathExists(filePath)) {
-      return res.status(404).json({ error: 'File not found' });
+      res.status(404).json({ error: 'File not found' });
     }
 
     res.download(filePath);

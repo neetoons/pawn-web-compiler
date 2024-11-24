@@ -1,11 +1,20 @@
-// @ts-nocheck
 import { exec } from 'child_process';
 import fs from 'fs-extra';
 import path from 'path';
 import * as unzipper from 'unzipper';
 import { CONFIG } from '../config/index';
 import { logger } from '../utils/logger';
-import { CompileError } from '../types';
+
+export class CompileError extends Error {
+    statusCode: number;
+
+    constructor(message: string, statusCode: number) {
+        super(message);
+        this.name = 'CompileError';
+        this.statusCode = statusCode;
+        Object.setPrototypeOf(this, CompileError.prototype);
+    }
+}
 
 export class CompilerService {
     private static instance: CompilerService;
@@ -19,78 +28,165 @@ export class CompilerService {
         return CompilerService.instance;
     }
 
-    async unzipGamemode(zipPath: string, outputDir: string): Promise<void> {
-        try {
-            // Asegúrate de que el directorio de salida existe
-            await fs.ensureDir(outputDir);
-            const zipStream = fs.createReadStream(zipPath);
+    // Descomprime el archivo ZIP y lista todos los directorios encontrados
+    async unzipAndListFolders(zipPath: string, outputDir: string) {
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+        }
 
-            await new Promise<void>((resolve, reject) => {
-                zipStream
-                    .pipe(unzipper.Extract({ path: outputDir }))
-                    .on('close', resolve)
-                    .on('error', reject);
+        const directoryNames: string[] = [];
+        fs.createReadStream(zipPath)
+            .pipe(unzipper.Parse())
+            .on('entry', entry => {
+                const fileName = entry.path;
+                const type = entry.type; // 'File' o 'Directory'
+
+                if (type === 'Directory') {
+                    console.log(`Directorio encontrado: ${fileName}`);
+                    directoryNames.push(fileName);
+                }
+
+                entry.autodrain();
+            })
+            .on('finish', () => {
+                console.log('Descompresión completada. Directorios encontrados:');
+                console.log(directoryNames);
+            })
+            .on('error', (err) => {
+                console.error('Error al descomprimir:', err);
             });
+    }
 
-            logger.info(`Unzipped gamemode to ${outputDir}`);
+    // Descomprime el archivo ZIP y busca el directorio gamemodes
+    async unzipGamemode(zipPath: string, outputDir: string): Promise<any> {
+        try {
+            console.log("Descomprimiendo...");
+            console.log("ZIP Path:", zipPath);
+            console.log("Output Directory:", outputDir);
+
+            // Descomprimir y listar los directorios en el proceso
+            await this.unzipAndListFolders(zipPath, outputDir);
+
+            await fs.createReadStream(zipPath)
+                .pipe(unzipper.Extract({ path: outputDir }))
+                .on("close", () => {
+                    console.log("Descompresión completada");
+                });
+
+            // Ahora verificamos la existencia de 'gamemodes'
+            const gamemodesDir = await this.findGamemodesDirectory(outputDir);
+            console.log('Gamemodes directory found at:', gamemodesDir);
+
+            if (!gamemodesDir) {
+                throw new Error(`'gamemodes' directory not found in ${outputDir}`);
+            }
+
+            // Proceder con la compilación del gamemode
+            await this.compile(gamemodesDir);
+
+            return outputDir;
+
         } catch (error) {
-            logger.error('Failed to unzip gamemode', { error });
-            throw new Error('Failed to unzip gamemode');
+            console.log("Error al descomprimir:", error);
+            throw error;
         }
     }
 
-    async compile(inputDir: string, outputDir: string): Promise<void> {
-        try {
-            const gamemodesDir = path.join(inputDir, 'gamemodes');
-            if (!(await fs.pathExists(gamemodesDir))) {
-                throw this.createError(`'gamemodes' directory not found in ${inputDir}`, 400);
-            }
+    private async findGamemodesDirectory(baseDir: string): Promise<string | null> {
+        const files = await fs.readdir(baseDir);
+        console.log(`Buscando en: ${baseDir}`); // Registro para ver en qué directorio estamos buscando
     
-            // Verifica que haya al menos un archivo .pwn
+        for (let file of files) {
+            const fullPath = path.join(baseDir, file);
+            const stat = await fs.stat(fullPath);
+    
+            console.log(`Explorando: ${fullPath}`); // Ver qué directorios estamos explorando
+    
+            if (stat.isDirectory()) {
+                // Verificar si encontramos el directorio 'gamemodes' en este nivel
+                if (file.toLowerCase() === 'gamemodes') {
+                    console.log(`Directorio 'gamemodes' encontrado en: ${fullPath}`); // Confirmar cuando lo encontramos
+                    return fullPath; // Retornar la ruta completa del directorio 'gamemodes'
+                }
+    
+                // Si no encontramos 'gamemodes', seguimos buscando recursivamente en los subdirectorios
+                const subDir = await this.findGamemodesDirectory(fullPath);
+                if (subDir) {
+                    return subDir;
+                }
+            }
+        }
+    
+        console.log('No se encontró el directorio "gamemodes" en esta ruta'); // Si no encontramos el directorio en esta ruta
+        return null; // Si no encontramos 'gamemodes'
+    }
+    
+    // Función principal para compilar el archivo pwn
+    async compile(gamemodesDir: string): Promise<void> {
+        try {
             const files = await fs.readdir(gamemodesDir);
             const pwnFile = files.find(file => file.endsWith('.pwn'));
+
             if (!pwnFile) {
                 throw this.createError('No .pwn file found in the gamemodes directory', 400);
             }
-    
-            const pwnPath = path.join(gamemodesDir, pwnFile); // Ruta correcta para el archivo .pwn
-            const compilerPath = path.join(CONFIG.PATHS.COMPILER, 'pawncc'); // Ruta al compilador
-    
-            // Corrige la ruta de salida para que solo sea el directorio y el nombre del archivo .amx
-            const outputFilePath = path.join(outputDir, `${pwnFile.replace('.pwn', '.amx')}`);
-    
-            logger.info('Paths being used:', { compilerPath, pwnPath, outputFilePath });
-    
-            // Asegúrate de que el directorio de salida exista antes de continuar
-            await fs.ensureDir(path.dirname(outputFilePath));
-    
-            // Verifica si el compilador tiene permisos de ejecución
+
+            const pwnPath = path.join(gamemodesDir, pwnFile);
+            const compilerPath = path.join(CONFIG.PATHS.COMPILER, 'pawncc');
+            const outputFilePath = path.join(gamemodesDir, `${pwnFile.replace('.pwn', '.amx')}`);
+            const pawnoIncludeDir = path.join(gamemodesDir, 'pawno', 'include');
+
+            logger.info('Paths being used:', { compilerPath, pwnPath, outputFilePath, pawnoIncludeDir });
+
+            // Asegurarse de que los directorios padres existan
+            await fs.ensureDir(pawnoIncludeDir);
+
             if (process.platform !== 'win32') {
                 await fs.chmod(compilerPath, '755');
             }
-    
-            // Ejecuta el comando de compilación
-            const compileResult = await this.executeCompilerCommand(compilerPath, pwnPath, outputFilePath);
+
+            const compileResult = await this.executeCompilerCommand(
+                compilerPath,
+                pwnPath,
+                outputFilePath,
+                pawnoIncludeDir
+            );
+
             if (compileResult.success) {
-                logger.success('Compilation successful');
+                logger.info('Compilation successful');
             } else {
                 throw this.createError(`Compilation failed: ${compileResult.stderr || compileResult.stdout}`, 500);
             }
+
+            // Copiar los archivos compilados y todos los archivos a la carpeta final
+            const finalOutputDir = path.join(gamemodesDir, 'compiled');
+            await fs.copy(gamemodesDir, finalOutputDir, { overwrite: true });
+
+            logger.info(`Copied compiled gamemode and all files to ${finalOutputDir}`);
         } catch (error) {
-            logger.error('Compilation error', { error });
-            throw error; // Propaga el error para manejo adicional
+            logger.error('Compilation error', {
+                error: error instanceof Error ? error.stack : 'Unknown error',
+            });
+            throw error instanceof CompileError ? error : this.createError(
+                `Compilation process failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                500
+            );
         }
     }
-    
 
-    private async executeCompilerCommand(compilerPath: string, pwnPath: string, outputFilePath: string): Promise<{ success: boolean, stdout: string, stderr: string }> {
-        return new Promise((resolve, reject) => {
-            const command = `"${compilerPath}" "${pwnPath}" -o"${outputFilePath}"`;
-            logger.info('Executing compiler', { command });
+    private async executeCompilerCommand(
+        compilerPath: string,
+        pwnPath: string,
+        outputFilePath: string,
+        pawnoIncludeDir: string
+    ): Promise<{ success: boolean; stdout: string; stderr: string }> {
+        return new Promise((resolve) => {
+            const command = `"${compilerPath}" "${pwnPath}" -o"${outputFilePath}" -i"${pawnoIncludeDir}" -r -w1 -d3 -v2`;
+            logger.info('Executing compiler command', { command });
 
             exec(command, { cwd: path.dirname(pwnPath) }, (error, stdout, stderr) => {
                 if (error || stderr) {
-                    logger.error('Compilation failed', { stdout, stderr, error: error.message });
+                    logger.error('Compilation failed', { stdout, stderr, error: error?.message });
                     resolve({ success: false, stdout, stderr });
                 } else {
                     resolve({ success: true, stdout, stderr });
@@ -99,33 +195,21 @@ export class CompilerService {
         });
     }
 
-    private async resolveIncludes(pwnPath: string, includeDir: string): Promise<void> {
+    private createError(message: string, statusCode: number): CompileError {
+        return new CompileError(message, statusCode);
+    }
+
+    // Limpieza de archivos y directorios al finalizar
+    async cleanup(outputDir: string): Promise<void> {
         try {
-            const fileContent = await fs.readFile(pwnPath, 'utf8');
-            const includeRegex = /#include\s+["<](.+?)[">]/g;
-            const matches = [...fileContent.matchAll(includeRegex)];
+            // Limpiar los directorios vacíos, si es necesario
+            await fs.emptyDir(outputDir); // Elimina todos los archivos dentro del directorio
+            await fs.remove(outputDir); // Elimina el directorio en sí
 
-            for (const match of matches) {
-                const includePath = match[1];
-                const resolvedPath = path.resolve(path.dirname(pwnPath), includePath);
-
-                if (await fs.pathExists(resolvedPath)) {
-                    const destPath = path.join(includeDir, path.basename(includePath));
-                    await fs.copy(resolvedPath, destPath);
-                    logger.info(`Copied include file: ${resolvedPath} to ${destPath}`);
-                } else {
-                    logger.warn(`Include file not found: ${includePath}`);
-                }
-            }
+            console.log('Directorio de salida limpiado correctamente:', outputDir);
         } catch (error) {
-            logger.error('Failed to resolve includes', { error });
-            throw new Error('Failed to resolve includes');
+           
         }
     }
-
-    private createError(message: string, statusCode: number): CompileError {
-        const error = new Error(message) as CompileError;
-        error.statusCode = statusCode;
-        return error;
-    }
 }
+

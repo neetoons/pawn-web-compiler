@@ -16,6 +16,16 @@ async function bootstrap() {
   app.use('/', compilerRoutes);
 
   // Asegurar que existan los directorios necesarios
+  // #include <> // "C:\path\to\pawncc" -I"C:\pawnwebcompiler\includes" "C:\path\to\mi_gamemode.pwn" -o"C:\path\to\mi_gamemode.amx"
+
+
+  // ./pawncc -v2 -d3 -r -w1 "C:\Users\zTrax\Desktop\pawnwebcompiler\samp037_svr_R2-2-1_win32\gamemodes\bare.pwn" -i"C:\Users\zTrax\Desktop\pawnwebcompiler\samp037_svr_R2-2-1_win32\include" -o"C:\Users\zTrax\Desktop\pawnwebcompiler\samp037_svr_R2-2-1_win32\gamemodes\bare.amx"
+  // pawno /include 
+  // pawno /pawncc 
+  // /gamemodes 
+  
+  //./pawncc -d2 -v2 -I"C:\Users\zTrax\Desktop\pawnwebcompiler\samp037_svr_R2-2-1_win32\pawno\include" "C:\Users\zTrax\Desktop\pawnwebcompiler\samp037_svr_R2-2-1_win32\gamemodes\bare.pwn" -o"C:\Users\zTrax\Desktop\pawnwebcompiler\samp037_svr_R2-2-1_win32\gamemodes\bare.amx"
+
   await Promise.all([
     fs.ensureDir(CONFIG.PATHS.UPLOADS),
     fs.ensureDir(CONFIG.PATHS.OUTPUT)

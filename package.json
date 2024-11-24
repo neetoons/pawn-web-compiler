@@ -2,7 +2,7 @@
   "name": "pawnwebcompiler",
   "packageManager": "yarn@4.4.1",
   "scripts": {
-    "start": "node dist/app.js",
+    "start": "node lib/app.js",
     "watch": "tsc-watch --onSuccess \"npm run start\""
   },
   "dependencies": {
