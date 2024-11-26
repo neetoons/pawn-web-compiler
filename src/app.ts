@@ -1,8 +1,8 @@
 import express from 'express';
 import cors from 'cors';
-import { CONFIG } from './config/index';
-import { logger } from './utils/logger';
-import compilerRoutes from './routes/compiler.routes';
+import { CONFIG } from './config/index.js';
+import { logger } from './utils/logger.js';
+import compilerRoutes from './routes/compiler.routes.js';
 import fs from "fs-extra"
 
 async function bootstrap() {

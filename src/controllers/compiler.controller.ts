@@ -1,16 +1,17 @@
 import { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs-extra';
-import { CompilerService } from '../services/compiler.service';
-import { CONFIG } from '../config/index';
-import { logger } from '../utils/logger';
-import { CompileError } from '../types';
+import { CompilerService } from '../services/compiler.service.js';
+import { CONFIG } from '../config/index.js';
+import { logger } from '../utils/logger.js';
+import { CompileError } from '../types/index.js';
 
 interface CustomRequest extends Omit<Request, 'file'> {
   file?: Express.Multer.File;
 }
 
 export async function compileHandler(req: CustomRequest, res: Response): Promise<any> {
+  console.log(req)
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }

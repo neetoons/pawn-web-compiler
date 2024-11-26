@@ -1,6 +1,6 @@
 import multer from 'multer';
 import path from 'path';
-import { CONFIG } from '../config/index';
+import { CONFIG } from '../config/index.js';
 
 const storage = multer.diskStorage({
   destination: CONFIG.PATHS.UPLOADS,

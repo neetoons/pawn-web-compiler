@@ -2,8 +2,8 @@ import { exec } from 'child_process';
 import fs from 'fs-extra';
 import path from 'path';
 import * as unzipper from 'unzipper';
-import { CONFIG } from '../config/index';
-import { logger } from '../utils/logger';
+import { CONFIG } from '../config/index.js';
+import { logger } from '../utils/logger.js';
 
 export class CompileError extends Error {
     statusCode: number;

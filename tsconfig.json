@@ -2,8 +2,8 @@
     "compilerOptions": {
       "rootDir": "src",
       "outDir": "lib",
-      "target": "ES2023",
-      "module": "CommonJS",
+      "target": "ESNext",   
+      "module": "NodeNext",                                /* Specify what module code is generated. */
       "esModuleInterop": true,
       "forceConsistentCasingInFileNames": true,
       "strict": true,
