@@ -15,3 +15,5 @@
 lib/
 node_modules/
 logs/
+src/output
+src/uploads

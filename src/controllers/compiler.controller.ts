@@ -11,7 +11,6 @@ interface CustomRequest extends Omit<Request, 'file'> {
 }
 
 export async function compileHandler(req: CustomRequest, res: Response): Promise<any> {
-  console.log(req)
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
@@ -20,11 +19,11 @@ export async function compileHandler(req: CustomRequest, res: Response): Promise
   const zipPath = req.file.path;
   const fileId = path.parse(req.file.filename).name;
   const outputDir = path.join(CONFIG.PATHS.UPLOADS, fileId);
-  const outputFile = path.join(CONFIG.PATHS.OUTPUT, `${fileId}.amx`);
+  const outputFilePath = path.join(CONFIG.PATHS.OUTPUT, `${fileId}.amx`);
 
   try {
     // Descomprimir
-    await service.unzipGamemode(zipPath, outputDir);
+    await service.unzipGamemode(zipPath, outputDir, outputFilePath, fileId);
 
     res.json({
       message: 'Compilation successful',

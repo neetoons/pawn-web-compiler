@@ -2,8 +2,8 @@
     "compilerOptions": {
       "rootDir": "src",
       "outDir": "lib",
-      "target": "ESNext",   
-      "module": "NodeNext",                                /* Specify what module code is generated. */
+      "target": "ESNext",
+      "module": "NodeNext",
       "esModuleInterop": true,
       "forceConsistentCasingInFileNames": true,
       "strict": true,

@@ -57,33 +57,83 @@ export class CompilerService {
             });
     }
 
+    extractZip(zipPath:string, outputDir:string): Promise<void> {
+        return new Promise((resolve, reject) => {
+            fs.createReadStream(zipPath)
+                .pipe(unzipper.Extract({ path: outputDir }))
+                .on("close", () => {
+                    console.log("Descompresión completada");
+                    resolve();
+                })
+                .on("error", (err) => {
+                    reject(new Error(`Failed to extract zip: ${err.message}`));
+                });
+        });
+    }
+    private async findGamemodeFileName(baseDir: string): Promise<string | null> {
+        const file = await fs.readFile(baseDir, "utf-8");
+        const lines = file.split(/\n/)
+        const regex = /^gamemode0?\s+([\w\d_]+)/im
+        console.log(`Buscando nombre de la gamemode en: ${baseDir}`); // Registro para ver en qué directorio estamos buscando
+        for(const line of lines) {
+            const match = line.match(regex)
+            if(match != null && match[1]) {
+                console.log(`Nombre de la gamemode encontrada: ${match[1]}`)
+                return match[1];
+            }
+        }
+
+        console.log('No se encontró el archivo "server.cfg" en esta ruta'); // Si no encontramos el directorio en esta ruta
+        return null; // Si no encontramos 'gamemodes'
+    }
+
+    private async findServerCFG(baseDir: string): Promise<string | null> {
+        console.log(`Buscando server.cfg en: ${baseDir}`); // Registro para ver en qué directorio estamos buscando
+        const files = await fs.readdir(baseDir)
+        for (const file of files) {
+            const fullPath = path.join(baseDir, file);
+            const stat = await fs.stat(fullPath);
+            if (stat.isDirectory())  continue;
+            //// Verificar si encontramos el archivo 'server.cfg' en este nivel
+            if (file.toLowerCase() === 'server.cfg') {
+                console.log(`Archivo 'server.cfg' encontrado`); // Confirmar cuando lo encontramos
+                return fullPath; // Retornar la ruta completa del directorio 'server.cfg'
+            }
+        }
+        console.log('No se encontró el archivo "server.cfg" en esta ruta'); // Si no encontramos el directorio en esta ruta
+        return null; // Si no encontramos 'gamemodes'
+    }
+
     // Descomprime el archivo ZIP y busca el directorio gamemodes
-    async unzipGamemode(zipPath: string, outputDir: string): Promise<any> {
+    async unzipGamemode(zipPath: string, outputDir: string, outputFilePath:string, outputFileName:string): Promise<any> {
         try {
             console.log("Descomprimiendo...");
             console.log("ZIP Path:", zipPath);
             console.log("Output Directory:", outputDir);
 
             // Descomprimir y listar los directorios en el proceso
-            await this.unzipAndListFolders(zipPath, outputDir);
+            //await this.unzipAndListFolders(zipPath, outputDir);
+            await this.extractZip(zipPath, outputDir);
 
-            await fs.createReadStream(zipPath)
-                .pipe(unzipper.Extract({ path: outputDir }))
-                .on("close", () => {
-                    console.log("Descompresión completada");
-                });
-
-            // Ahora verificamos la existencia de 'gamemodes'
             const gamemodesDir = await this.findGamemodesDirectory(outputDir);
-            console.log('Gamemodes directory found at:', gamemodesDir);
-
+            //// Ahora verificamos la existencia de 'gamemodes'
             if (!gamemodesDir) {
                 throw new Error(`'gamemodes' directory not found in ${outputDir}`);
             }
 
-            // Proceder con la compilación del gamemode
-            await this.compile(gamemodesDir);
+            // Buscamos el server.cfg para saber el nombre de la gamemode
+            const serverConfigPath = await this.findServerCFG(outputDir);
+            if(!serverConfigPath) {
+                throw new Error("archivo server.cfg no encontrado")
+            }
 
+            // Buscamos el nombre de la gamemode
+            const gamemodeFileName = await this.findGamemodeFileName(serverConfigPath);
+            if(!gamemodeFileName)  {
+                throw new Error("nombre de la gamemode no encontrada")
+            }
+            // Proceder con la compilación del gamemode
+            await this.compile(gamemodesDir, gamemodeFileName, outputFilePath, outputFileName);
             return outputDir;
 
         } catch (error) {
@@ -91,28 +141,19 @@ export class CompilerService {
             throw error;
         }
     }
-
     private async findGamemodesDirectory(baseDir: string): Promise<string | null> {
         const files = await fs.readdir(baseDir);
-        console.log(`Buscando en: ${baseDir}`); // Registro para ver en qué directorio estamos buscando
+        console.log(`Buscando directorio gamemodes en: ${baseDir}`); // Registro para ver en qué directorio estamos buscando
     
         for (let file of files) {
             const fullPath = path.join(baseDir, file);
             const stat = await fs.stat(fullPath);
     
-            console.log(`Explorando: ${fullPath}`); // Ver qué directorios estamos explorando
-    
             if (stat.isDirectory()) {
                 // Verificar si encontramos el directorio 'gamemodes' en este nivel
                 if (file.toLowerCase() === 'gamemodes') {
-                    console.log(`Directorio 'gamemodes' encontrado en: ${fullPath}`); // Confirmar cuando lo encontramos
+                    console.log(`Directorio 'gamemodes' encontrado`); // Confirmar cuando lo encontramos
                     return fullPath; // Retornar la ruta completa del directorio 'gamemodes'
-                }
-    
-                // Si no encontramos 'gamemodes', seguimos buscando recursivamente en los subdirectorios
-                const subDir = await this.findGamemodesDirectory(fullPath);
-                if (subDir) {
-                    return subDir;
                 }
             }
         }
@@ -120,36 +161,35 @@ export class CompilerService {
         console.log('No se encontró el directorio "gamemodes" en esta ruta'); // Si no encontramos el directorio en esta ruta
         return null; // Si no encontramos 'gamemodes'
     }
-    
+
     // Función principal para compilar el archivo pwn
-    async compile(gamemodesDir: string): Promise<void> {
+    async compile(gamemodesDir: string, gamemodeFileName:string, outputFilePath:string, zipDirName:string ): Promise<void> {
         try {
-            const files = await fs.readdir(gamemodesDir);
-            const pwnFile = files.find(file => file.endsWith('.pwn'));
-
-            if (!pwnFile) {
-                throw this.createError('No .pwn file found in the gamemodes directory', 400);
-            }
-
-            const pwnPath = path.join(gamemodesDir, pwnFile);
-            const compilerPath = path.join(CONFIG.PATHS.COMPILER, 'pawncc');
-            const outputFilePath = path.join(gamemodesDir, `${pwnFile.replace('.pwn', '.amx')}`);
-            const pawnoIncludeDir = path.join(gamemodesDir, 'pawno', 'include');
-
-            logger.info('Paths being used:', { compilerPath, pwnPath, outputFilePath, pawnoIncludeDir });
+            const outputFileName = zipDirName + ".amx"
+            const pawnoIncludeDir = path.join('pawno', 'include');
 
             // Asegurarse de que los directorios padres existan
             await fs.ensureDir(pawnoIncludeDir);
 
+
+            let compilerPath;
             if (process.platform !== 'win32') {
+                compilerPath = path.join(process.cwd(), CONFIG.PATHS.COMPILER, 'pawncc');
                 await fs.chmod(compilerPath, '755');
+            } else {
+                compilerPath = path.join(process.cwd(), CONFIG.PATHS.COMPILER, 'pawncc.exe');
+            }
+            if(!compilerPath) {
+                throw new Error("Sistema operativo no encontrado")
             }
 
+            logger.info('Paths being used:', { compilerPath, zipDirName, gamemodesDir, outputFileName, pawnoIncludeDir });
+            const gamemodesDirPath = path.join(process.cwd(), gamemodesDir)
             const compileResult = await this.executeCompilerCommand(
                 compilerPath,
-                pwnPath,
-                outputFilePath,
-                pawnoIncludeDir
+                gamemodesDirPath,
+                outputFileName,
+                gamemodeFileName
             );
 
             if (compileResult.success) {
@@ -158,11 +198,9 @@ export class CompilerService {
                 throw this.createError(`Compilation failed: ${compileResult.stderr || compileResult.stdout}`, 500);
             }
 
-            // Copiar los archivos compilados y todos los archivos a la carpeta final
-            const finalOutputDir = path.join(gamemodesDir, 'compiled');
-            await fs.copy(gamemodesDir, finalOutputDir, { overwrite: true });
-
-            logger.info(`Copied compiled gamemode and all files to ${finalOutputDir}`);
+            // Copiar los archivos compilados y todos los archivos a la directorio final
+            await fs.copy(path.join(gamemodesDir, outputFileName), outputFilePath, { overwrite: true });
+            logger.info(`Copied compiled gamemode and all files to ${outputFilePath}`);
         } catch (error) {
             logger.error('Compilation error', {
                 error: error instanceof Error ? error.stack : 'Unknown error',
@@ -176,15 +214,15 @@ export class CompilerService {
 
     private async executeCompilerCommand(
         compilerPath: string,
-        pwnPath: string,
-        outputFilePath: string,
-        pawnoIncludeDir: string
+        gamemodesDirPath: string,
+        outputFileName: string,
+        gamemodeFileName:string
     ): Promise<{ success: boolean; stdout: string; stderr: string }> {
         return new Promise((resolve) => {
-            const command = `"${compilerPath}" "${pwnPath}" -o"${outputFilePath}" -i"${pawnoIncludeDir}" -r -w1 -d3 -v2`;
+            const command = `"${compilerPath}" "./${gamemodeFileName}.pwn" -o"${outputFileName}" -i"../pawno/include" -r -w1 -d3 -v2`;
             logger.info('Executing compiler command', { command });
 
-            exec(command, { cwd: path.dirname(pwnPath) }, (error, stdout, stderr) => {
+            exec(command, { cwd: path.dirname(gamemodesDirPath) + "/gamemodes"}, (error, stdout, stderr) => {
                 if (error || stderr) {
                     logger.error('Compilation failed', { stdout, stderr, error: error?.message });
                     resolve({ success: false, stdout, stderr });
