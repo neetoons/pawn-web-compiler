@@ -57,18 +57,9 @@ export class CompilerService {
             });
     }
 
-    extractZip(zipPath:string, outputDir:string): Promise<void> {
-        return new Promise((resolve, reject) => {
-            fs.createReadStream(zipPath)
-                .pipe(unzipper.Extract({ path: outputDir }))
-                .on("close", () => {
-                    console.log("Descompresión completada");
-                    resolve();
-                })
-                .on("error", (err) => {
-                    reject(new Error(`Failed to extract zip: ${err.message}`));
-                });
-        });
+    async extractZip(zipPath:string, outputDir:string): Promise<void> {
+        const directory = await unzipper.Open.file(zipPath);
+        return await directory.extract({ path: outputDir })
     }
     private async findGamemodeFileName(baseDir: string): Promise<string | null> {
         const file = await fs.readFile(baseDir, "utf-8");
@@ -148,7 +139,6 @@ export class CompilerService {
         for (let file of files) {
             const fullPath = path.join(baseDir, file);
             const stat = await fs.stat(fullPath);
-    
             if (stat.isDirectory()) {
                 // Verificar si encontramos el directorio 'gamemodes' en este nivel
                 if (file.toLowerCase() === 'gamemodes') {

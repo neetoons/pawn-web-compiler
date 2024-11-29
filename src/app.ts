@@ -4,6 +4,7 @@ import { CONFIG } from './config/index.js';
 import { logger } from './utils/logger.js';
 import compilerRoutes from './routes/compiler.routes.js';
 import fs from "fs-extra"
+import path from "path"
 
 async function bootstrap() {
   const app = express();
@@ -14,6 +15,8 @@ async function bootstrap() {
 
   // Routes
   app.use('/', compilerRoutes);
+  app.use(express.static(path.join(process.cwd(), 'src/public')));
+
 
   // Asegurar que existan los directorios necesarios
   // #include <> // "C:\path\to\pawncc" -I"C:\pawnwebcompiler\includes" "C:\path\to\mi_gamemode.pwn" -o"C:\path\to\mi_gamemode.amx"
